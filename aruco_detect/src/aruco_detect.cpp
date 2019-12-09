@@ -317,8 +317,10 @@ void FiducialsNode::imageCallback(const sensor_msgs::ImageConstPtr & msg) {
         return; //return without doing anything
     }
 
+	frameNum++;
+	if (frameNum % 3 != 0) return; // skip a few frames, reduce CPU
+	
     ROS_INFO("Got image %d", msg->header.seq);
-    frameNum++;
 
     cv_bridge::CvImagePtr cv_ptr;
 
@@ -334,6 +336,8 @@ void FiducialsNode::imageCallback(const sensor_msgs::ImageConstPtr & msg) {
 
     try {
         cv_ptr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8);
+		
+		cv_ptr->image = ~cv_ptr->image; // invert
 
         vector <int>  ids;
         vector <vector <Point2f> > corners, rejected;
