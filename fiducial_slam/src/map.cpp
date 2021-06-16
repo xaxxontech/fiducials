@@ -53,11 +53,6 @@ static double systematic_error = 0.01;
 Observation::Observation(int fid, const tf2::Stamped<TransformWithVariance> &camFid) {
     this->fid = fid;
 
-    tf2_ros::TransformBroadcaster broadcaster;
-    geometry_msgs::TransformStamped ts = toMsg(camFid);
-    ts.child_frame_id = "fid" + std::to_string(fid);
-    broadcaster.sendTransform(ts);
-
     T_camFid = camFid;
     T_fidCam = T_camFid;
     T_fidCam.transform = T_camFid.transform.inverse();
@@ -115,9 +110,13 @@ Map::Map(ros::NodeHandle &nh) : tfBuffer(ros::Duration(30.0)) {
     std::fill(covarianceDiagonal.begin(), covarianceDiagonal.end(), 0);
     overridePublishedCovariance = nh.getParam("covariance_diagonal", covarianceDiagonal);
     if (overridePublishedCovariance) {
+        if (covarianceDiagonal.size() != 6) {
+            ROS_WARN("ignoring covariance_diagonal because it has %ld elements, not 6", covarianceDiagonal.size());
+            overridePublishedCovariance = false;
+        }
         // Check to make sure that the diagonal is non-zero
         for (auto variance : covarianceDiagonal) {
-            if (variance = 0) {
+            if (variance == 0) {
                 ROS_WARN("ignoring covariance_diagonal because it has 0 values");
                 std::fill(covarianceDiagonal.begin(), covarianceDiagonal.end(), 0);
                 break;
@@ -232,7 +231,7 @@ bool Map::lookupTransform(const std::string &from, const std::string &to, const 
     geometry_msgs::TransformStamped transform;
 
     try {
-        transform = tfBuffer.lookupTransform(from, to, time);
+        transform = tfBuffer.lookupTransform(from, to, time, ros::Duration(0.5));
 
         tf2::fromMsg(transform.transform, T);
         return true;
@@ -354,7 +353,6 @@ int Map::updatePose(std::vector<Observation> &obs, const ros::Time &time,
     std::string outFrame = baseFrame;
 
     if (!odomFrame.empty()) {
-        outFrame = odomFrame;
         tf2::Transform odomTransform;
         if (lookupTransform(odomFrame, baseFrame, outPose.stamp_, odomTransform)) {
             outPose.setData(basePose * odomTransform.inverse());
@@ -362,6 +360,10 @@ int Map::updatePose(std::vector<Observation> &obs, const ros::Time &time,
 
             tf2::Vector3 c = odomTransform.getOrigin();
             ROS_INFO("odom   %lf %lf %lf", c.x(), c.y(), c.z());
+        }
+        else {
+            // Don't publish anything if map->odom was requested and is unavailaable
+            return numEsts;
         }
     }
 
@@ -440,7 +442,8 @@ void Map::autoInit(const std::vector<Observation> &obs, const ros::Time &time) {
         int idx = findClosestObs(obs);
 
         if (idx == -1) {
-            ROS_WARN("Could not find a fiducial to initialize map from");
+	     ROS_WARN("Could not find a fiducial to initialize map from");
+	     return;
         }
         const Observation &o = obs[idx];
         originFid = o.fid;
